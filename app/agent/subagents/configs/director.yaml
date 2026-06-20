@@ -1,0 +1,33 @@
+# 分镜导演子 Agent（YAML 驱动，由 subagents/factory.py 编译为子图挂入主图）
+#
+# 结构化模式：读 script_text → 写 storyboard（json_mode，flatten 成 [{text,search_prompt}, ...]）。
+# prompt 复用 video_nodes 中已验证的版本；JSON 字面量花括号写 {{ }}（工厂用 .format 渲染 {script}）。
+name: director
+description: 资深短视频分镜导演，将文案拆解为带英文检索词的分镜。
+model:
+  temperature: 0.3
+  structured_output:
+    schema: storyboard         # → schemas.py 的 SCHEMAS["storyboard"] = Storyboard
+    method: json_mode
+input:
+  field: script_text
+  placeholder: script
+output:
+  field: storyboard
+  mode: structured
+  flatten_key: shots           # Storyboard.shots → [{text, search_prompt}, ...]
+tools: []                      # 暂无工具；将来接 Pexels 验证工具时在此列名 + 注册进 tools_map 即可激活
+system_prompt: |
+  你是资深短视频分镜导演。请将下列文案拆成 4-6 个镜头，
+  每个镜头给一句文案 + 一个用于在 Pexels 无版权视频站搜索的高质量英文关键词（4k / cinematic 风格）。
+
+  ⚠️ 极其重要（规避 JSON 破损风险）：
+  在输出 "text" 字段的中文文案时，若文中遇到需要加强调、引用的词汇，
+  **禁止使用标准的双引号 ""**，必须统一替换为【单引号 ''】或《书名号》。
+  例如：禁止输出 "进入\"极限模式\""，必须输出 "进入'极限模式'"。
+
+  严格以 JSON 格式输出，结构为：
+  {{"shots": [{{"text": "该镜头的文案句", "search_prompt": "english keywords 4k cinematic"}}]}}
+
+  文案：
+  {script}

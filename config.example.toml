@@ -1,0 +1,49 @@
+# MoneyPrinterClaw 全局配置示例
+# 复制为 config.toml 并填入实际值。
+# 路径相对于"项目根"(本文件所在目录);绝对路径直接使用。
+# 任何字段都可被环境变量 AGENT_<UPPER> 覆盖。
+
+# ---- LLM ----
+openai_api_key   = "sk-your-key-here"
+openai_base_url  = ""                            # 空 = OpenAI 官方;或填中转地址 / DeepSeek 等
+model_name       = "gpt-4o"
+model_temperature = 0.7
+model_max_tokens = 4096
+
+# ---- 持久化 ----
+sqlite_db_path = "storage/app.db"
+vector_db_path = "storage/vectors"
+
+# ---- 视频任务产物 ----
+video_tasks_dir = "storage/video_tasks"
+
+# ---- 字幕样式（ASS：尺寸单位 = ASS PlayRes，与 1080×1920 视频帧像素一致）----
+video_font_name = "STHeitiMedium.ttc"   # 字体文件名（在 resources/fonts/ 下）
+video_font_size = 60                     # ASS Fontsize；60 ≈ 视高 3%,占屏宽 6-7 字。觉得大就 50 / 40
+video_subtitle_margin_v = 270            # 字幕距底边距离（px）；270 ≈ 视高 14%,避开抖音 UI 安全区。觉得太高就 180 / 120
+video_subtitle_max_chars = 14            # 单行字幕字数硬上限（ColdForge 算法版断句用）；font_size 调大要相应调小
+video_subtitle_secondary_color = "#FFFF00"  # \kf 卡拉OK 已唱字色（黄）；与白色未唱字形成丝滑滑过对比
+
+# ---- ASR 字幕识别（faster-whisper）----
+# 字幕由 ASR 从 TTS 音频反向识别（词级时间戳 → ASS）；TTS 退化为纯 text→audio,与字幕解耦。
+# ⚠️ 中文场景【绝对不要】换 distil-whisper 系列：distil 训练数据英文 only,跑中文会吐空或翻译成英文。
+# 模型选择（CPU/int8 跑 30s TTS 干净音频估时）：
+#   small            244 MB   ~1s     中文 ~94%   入门级（资源紧张机器用）
+#   medium           769 MB   ~3-5s   中文 ~97%   稳健
+#   large-v3-turbo   ~1.5 GB  ~2-4s   中文 ~98%   ⭐默认（809M 蒸馏架构,比 large-v3 快 8x,多语言保留）
+#   large-v3           3 GB   ~8-15s  中文 ~98%+  GPU 用户首选；CPU 跑会拖慢整条流水线
+video_asr_model_size = "large-v3-turbo"
+video_asr_device = "cpu"               # cpu / cuda（cuda 需 ctranslate2 + 本机 CUDA 版本匹配）
+video_asr_compute_type = "int8"        # cpu→int8;cuda→float16
+video_asr_language = "zh"
+
+# ---- 联网搜索(博查AI)----
+bocha_api_key = "sk-your-bocha-key-here"
+
+# ---- 视频素材搜索 ----
+video_pexels_api_keys  = ""    # 逗号分隔的 Pexels API Keys
+video_pixabay_api_keys = ""    # 可选
+
+# ---- 沙箱 ----
+sandbox_enabled = true
+sandbox_timeout = 300

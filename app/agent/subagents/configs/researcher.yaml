@@ -1,0 +1,20 @@
+# 资料员子 Agent（Supervisor 创意中枢的 worker）
+#
+# text+tools(ReAct) 模式：读 video_topic → 调 web_search 检索 → 写 research_notes（文本资料）。
+# 首个实战工厂 ReAct 工具路径的 worker（私有 sub_messages 循环，不污染父图）。
+name: researcher
+description: 短视频资料员，挂联网搜索工具，检索主题热点/受众痛点/趣味事实，产出资料供编剧参考。
+model:
+  temperature: 0.5
+input:
+  field: video_topic
+  placeholder: topic
+output:
+  field: research_notes
+  mode: text
+tools:
+  - web_search
+system_prompt: |
+  你是短视频资料员。围绕主题「{topic}」，使用 web_search 工具检索：近期热点、受众痛点、可拍成短视频的趣味事实/数据/故事。
+  检索完成后，把发现整理成一段简明资料，必须以「主题：{topic}」开头重述主题，随后列出 3-5 条可直接用于写稿的要点。
+  不要堆砌原文片段，要提炼。若搜索无果，就基于常识给出该主题的常见看点。

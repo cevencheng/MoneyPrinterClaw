@@ -1,0 +1,311 @@
+/* ═══════════════════════════════════════════════════════════════
+ * /settings 页面设计系统
+ * 风格：Tactile Studio Control Panel
+ * 温暖、有质感、像高端剪辑室/调音台一样的配置面板
+ * ═══════════════════════════════════════════════════════════════ */
+
+.settings-page {
+  --settings-bg: #f5f3ef;
+  --settings-card: #ffffff;
+  --settings-card-ghost: rgba(255, 255, 255, 0.72);
+  --settings-fg: #1c1917;
+  --settings-muted: #78716c;
+  --settings-border: #e6e2dd;
+  --settings-accent-llm: #134e4a;
+  --settings-accent-search: #b45309;
+  --settings-accent-media: #be123c;
+  --settings-shadow: 0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 28px rgba(0, 0, 0, 0.06);
+}
+
+.dark .settings-page {
+  --settings-bg: #0c0a09;
+  --settings-card: #1c1917;
+  --settings-card-ghost: rgba(28, 25, 23, 0.72);
+  --settings-fg: #fafaf9;
+  --settings-muted: #a8a29e;
+  --settings-border: #292524;
+  --settings-accent-llm: #2dd4bf;
+  --settings-accent-search: #fbbf24;
+  --settings-accent-media: #fb7185;
+  --settings-shadow: 0 1px 2px rgba(0, 0, 0, 0.2),
+    0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.settings-page {
+  background-color: var(--settings-bg);
+  color: var(--settings-fg);
+  position: relative;
+  min-height: 100vh;
+}
+
+/* 柔和的环境光晕 */
+.settings-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at 15% 0%,
+      color-mix(in oklch, var(--settings-accent-llm), transparent 88%) 0%,
+      transparent 45%
+    ),
+    radial-gradient(
+      circle at 85% 100%,
+      color-mix(in oklch, var(--settings-accent-search), transparent 90%) 0%,
+      transparent 45%
+    );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 颗粒纹理，增加胶片质感 */
+.settings-noise {
+  position: fixed;
+  inset: 0;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.settings-container {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes settings-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-animate {
+  animation: settings-fade-in-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 返回按钮 */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  border: 1px solid var(--settings-border);
+  background: var(--settings-card);
+  color: var(--settings-muted);
+  transition: all 0.2s ease;
+  box-shadow: var(--settings-shadow);
+}
+
+.back-button:hover {
+  border-color: var(--settings-accent-llm);
+  color: var(--settings-accent-llm);
+  transform: translateX(-2px);
+}
+
+/* 卡片 */
+.settings-card {
+  background: var(--settings-card);
+  border: 1px solid var(--settings-border);
+  border-radius: 20px;
+  box-shadow: var(--settings-shadow);
+  overflow: hidden;
+  position: relative;
+}
+
+.settings-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--card-accent, var(--settings-accent-llm));
+}
+
+/* 表单控件 */
+.settings-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--settings-border);
+  background: var(--settings-bg);
+  color: var(--settings-fg);
+  padding: 0.625rem 0.875rem;
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+}
+
+.settings-input:hover {
+  border-color: color-mix(in oklch, var(--settings-fg), transparent 78%);
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--card-accent, var(--settings-accent-llm));
+  box-shadow: 0 0 0 3px
+    color-mix(
+      in oklch,
+      var(--card-accent, var(--settings-accent-llm)),
+      transparent 86%
+    );
+}
+
+.settings-input::placeholder {
+  color: var(--settings-muted);
+  opacity: 0.65;
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--settings-fg);
+  margin-bottom: 0.375rem;
+}
+
+.settings-hint {
+  font-size: 0.75rem;
+  color: var(--settings-muted);
+  margin-top: 0.375rem;
+  line-height: 1.45;
+}
+
+.settings-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: color-mix(
+    in oklch,
+    var(--card-accent, var(--settings-accent-llm)),
+    transparent 88%
+  );
+  color: var(--card-accent, var(--settings-accent-llm));
+}
+
+.settings-badge::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 密码可见性切换 */
+.eye-button {
+  position: absolute;
+  right: 0.625rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 8px;
+  color: var(--settings-muted);
+  transition: all 0.15s ease;
+}
+
+.eye-button:hover {
+  background: color-mix(in oklch, var(--settings-fg), transparent 94%);
+  color: var(--settings-fg);
+}
+
+/* 侧边导航 */
+.nav-link {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  color: var(--settings-muted);
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover {
+  background: color-mix(in oklch, var(--settings-fg), transparent 96%);
+  color: var(--settings-fg);
+}
+
+.nav-link.active {
+  background: var(--settings-card);
+  border-color: var(--settings-border);
+  color: var(--settings-fg);
+  box-shadow: var(--settings-shadow);
+}
+
+.nav-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: color-mix(
+    in oklch,
+    var(--link-accent, var(--settings-accent-llm)),
+    transparent 88%
+  );
+  color: var(--link-accent, var(--settings-accent-llm));
+}
+
+/* 底部保存栏 */
+.save-bar {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  width: calc(100% - 2rem);
+  max-width: 580px;
+}
+
+.save-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.625rem 0.625rem 0.625rem 1.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--settings-border);
+  background: var(--settings-card-ghost);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--settings-shadow), 0 14px 44px rgba(0, 0, 0, 0.1);
+}
+
+.dark .save-bar-inner {
+  box-shadow: var(--settings-shadow), 0 14px 44px rgba(0, 0, 0, 0.35);
+}
+
+/* 提示横幅 */
+.settings-notice {
+  border-radius: 18px;
+  border: 1px solid
+    color-mix(in oklch, var(--settings-accent-search), transparent 80%);
+  background: color-mix(
+    in oklch,
+    var(--settings-accent-search),
+    transparent 92%
+  );
+}
+
+/* 响应式：小屏时隐藏侧边栏，保持垂直流 */
+@media (max-width: 1023px) {
+  .save-bar {
+    bottom: 1rem;
+  }
+}

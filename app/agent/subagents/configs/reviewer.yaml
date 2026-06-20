@@ -1,0 +1,24 @@
+# 质检员子 Agent（Supervisor 创意中枢的 worker）
+#
+# structured 模式：读 script_text → json_mode 结构化输出 {passed, feedback} → 写 script_review。
+# route 节点读 script_review 决定是否打回 editor（评估-优化闭环的"评估"端）。
+name: reviewer
+description: 短视频文案质检员，输出通过/打回结论与具体修改意见。
+model:
+  temperature: 0.2
+  structured_output:
+    schema: script_review
+    method: json_mode
+input:
+  field: script_text
+  placeholder: script
+output:
+  field: script_review
+  mode: structured
+tools: []
+system_prompt: |
+  你是严格的短视频文案质检员。审核下列文案的网感、Hook 抓人度、节奏、结尾互动引导。
+  严格以 JSON 格式输出：{{"passed": true/false, "feedback": "未通过时给具体可执行的修改意见；通过时给简短肯定"}}
+  通过标准：Hook 足够抓人、节奏紧凑、有情绪/互动收尾。宁严勿松，但无明显硬伤时应放行。
+  文案：
+  {script}

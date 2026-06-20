@@ -1,0 +1,45 @@
+# MoneyPrinterClaw 依赖 (C端单机版)
+
+# ---- Web 框架 ----
+fastapi>=0.115.0
+uvicorn>=0.30.0
+sse-starlette>=2.0.0          # SSE 流式响应支持
+
+# ---- 数据模型与配置 ----
+pydantic>=2.0.0
+pydantic-settings>=2.0.0     # 环境变量配置管理
+
+# ---- 核心关系型与状态数据库 (替代 MongoDB/PG) ----
+aiosqlite>=0.20.0            # 极速纯异步 SQLite 驱动 (单文件，开箱即用)
+SQLAlchemy>=2.0.0            # Python 最强 ORM (配合 SQLite 使用)
+langgraph-checkpoint-sqlite>=2.0.0  # LangGraph 官方 SQLite 记忆断点
+
+# ---- 向量数据库 (面向未来，替代 Milvus/Qdrant) ----
+lancedb>=0.6.0               # 极其轻量的 Serverless 向量库 (无后台进程，纯本地文件)
+
+# ---- 视频引擎（自研，替代 MoneyPrinterTurbo）----
+edge-tts>=7.0.0              # edge-tts 语音合成
+faster-whisper>=1.0.0        # CTranslate2 后端 ASR（large-v3 词级时间戳 → ASS 字幕，与 TTS 解耦）
+moviepy>=2.0.0               # 视频剪辑（combine/generate）
+pillow>=10.0.0               # 字幕文本测量（PIL）
+requests>=2.31.0             # Pexels/Pixabay 素材下载
+
+# ---- YAML 解析 ----
+pyyaml>=6.0
+
+# ---- HTTP 请求 ----
+httpx>=0.27.0                # 异步 HTTP 客户端
+
+# ---- 搜索 ----
+ddgs>=9.0.0                   # DuckDuckGo 搜索（备选，国内需代理）
+
+# ---- LLM SDK ----
+openai>=1.0.0                # OpenAI 兼容 API 客户端
+
+# ---- LangGraph 生态 ----
+langgraph>=0.2.0             # Agent 状态图与循环工作流
+langchain-core>=0.3.0        # 消息、工具、回调抽象
+langchain-openai>=0.2.0      # LangChain 版 OpenAI 聊天模型
+
+# ---- 开发工具 ----
+python-dotenv>=1.0.0         # .env 文件加载
