@@ -15,6 +15,7 @@ Agent Skills 标准 client（agentskills.io 规范实现）。
 from agent.skills.catalog import render_catalog_prompt
 from agent.skills.discovery import SkillMeta, discover_skills, get_catalog, refresh_skills
 from agent.skills.loader import activate
+from agent.skills.tools import activate_skill, read_skill_resource, run_skill_script
 
 __all__ = [
     "SkillMeta",
@@ -23,4 +24,7 @@ __all__ = [
     "refresh_skills",
     "activate",
     "render_catalog_prompt",
+    "activate_skill",
+    "run_skill_script",
+    "read_skill_resource",
 ]
