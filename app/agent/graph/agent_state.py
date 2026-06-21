@@ -70,6 +70,13 @@ class AgentState(TypedDict):
     # 回 resource_prep 重做（progress.json 跳过已完成子步、只重试失败的），同张卡原地推进,
     # 不新建任务、不新建卡（恢复"一任务一卡"）。成功/彻底失败回 agent 时重置。
     video_retry_count: int
+    # render_node 的临时路由标志（仿 batch_route）：单视频 render 后由 render_node 自己决定下一步——
+    # "resource_prep"（重试,复用同 task_id）/ "agent"（成功回总结 或 彻底失败回战败 ToolMessage）。
+    # 必要：原 after_render 用 video_retry_count 计数器推断路由,与 render_node 的重试/彻底失败分支
+    # 错位一格(2<MAX_RETRY 走重试分支但 after_render 见 vrc>=MAX_RETRY 回 agent),导致单视频第 2 次
+    # 失败时不带战败 ToolMessage 唤醒 agent → 未应答的 plan_video tool_call → agent 盲目"二胎"下发
+    # 新 plan_video → 幽灵卡 + 双卡。显式 route 字段消除计数器推断的歧义。
+    video_route: str
     # plan_video_batch 的 tool_call_id（batch_start 写入,batch_summary 用之回 ToolMessage）。
     # 必要：messages 被 keep_last_k 截断后,batch_summary 反查 messages 可能找不到原 tool_call。
     batch_tool_call_id: str

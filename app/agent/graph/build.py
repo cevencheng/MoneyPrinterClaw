@@ -143,7 +143,26 @@ async def build_agent(checkpointer):
 
         messages = [SystemMessage(content=dynamic_prompt)] + list(state["messages"])
         messages = _sanitize_messages(messages)
-        response = await model.ainvoke(messages)
+        try:
+            response = await model.ainvoke(messages)
+        except Exception as e:
+            # 400 "tool must be response to preceding tool_calls" 等结构化校验失败时,
+            # 打印消息角色序列 + tool_call_id 配对,定位是哪条 ToolMessage 成了孤儿。
+            # _sanitize 理论上已清干净,此日志用于捕获遗漏的边界（如新引入的消息路径）。
+            seq = []
+            for m in messages:
+                role = type(m).__name__
+                tcs = getattr(m, "tool_calls", None) or []
+                tcid = getattr(m, "tool_call_id", None)
+                if tcs:
+                    seq.append(f"{role}(tool_calls={[tc.get('id') for tc in tcs]})")
+                elif tcid:
+                    seq.append(f"{role}(tool_call_id={tcid})")
+                else:
+                    seq.append(role)
+            logger.exception("[agent] model.ainvoke 失败（消息序列见下）: %s", e)
+            logger.error("[agent] 消息序列: %s", " | ".join(seq))
+            raise
 
         # ---- 日志：思考过程（DeepSeek thinking 的 reasoning_content）----
         ak = getattr(response, "additional_kwargs", None) or {}

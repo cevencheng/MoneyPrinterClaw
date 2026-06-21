@@ -78,6 +78,11 @@ def _prepare_video_round(topic: str, font_size: int = 0) -> dict:
         # 每轮新视频开始强制物理清零，斩断上一轮遗毒。
         "supervisor_iteration": 0,
         "supervisor_next": "",
+        # 失败重试计数 + 路由标志归零：上一个视频若失败会留下 video_retry_count=2 与
+        # video_route="resource_prep"，本视频首次 render 失败时 render_node 会误判"已超上限"
+        # 直接彻底失败（甚至死循环）。每轮新视频强制清零，恢复完整重试预算。
+        "video_retry_count": 0,
+        "video_route": "",
     }
 
 
@@ -297,6 +302,7 @@ async def render_node(state):
             "script_text": "",
             "storyboard": [],
             "video_retry_count": 0,  # 成功 reset
+            "video_route": "agent",  # 成功回总结
         }
 
     # ---- 失败：能重试就发 render_failed + 自愈弹幕,回 resource_prep(不发 ToolMessage)----
@@ -317,6 +323,7 @@ async def render_node(state):
         )
         return {
             "video_retry_count": retry_count + 1,  # resource_prep 重做,同 task_id 同卡
+            "video_route": "resource_prep",  # 复用同 task_id 重做,不唤醒 agent
             # 不回 ToolMessage:重试循环在 resource_prep↔render 内,不唤醒 agent,无孤儿风险
         }
 
@@ -349,6 +356,7 @@ async def render_node(state):
         "messages": msgs,
         "batch_results": batch_results,  # 单视频失败也登记,供 batch_redo_start 手动重试
         "video_retry_count": 0,  # 彻底失败回 agent,reset 供下次新任务
+        "video_route": "agent",  # 彻底失败回 agent（已带战败 ToolMessage 钳制,封死盲目"二胎"）
     }
 
 
@@ -486,6 +494,9 @@ async def batch_dispatch_node(state, config):
                 # 创意期计数器归零（同 _prepare_video_round）：降级 creative 重生成时斩断上一轮遗毒
                 "supervisor_iteration": 0,
                 "supervisor_next": "",
+                # 失败重试计数 + 路由标志归零（同 _prepare_video_round）：补做轮恢复完整重试预算
+                "video_retry_count": 0,
+                "video_route": "",
                 # 有 script → 跳 creative 直接 resource_prep；无 script（历史数据/creative 崩）→ 降级 creative 重生成
                 "batch_route": "resource_prep" if script else "supervisor_route",
             }
@@ -633,17 +644,18 @@ def after_creative(state):
 def after_render(state):
     """渲染后路由。
     批量模式（batch_queue 字段存在）回 batch_dispatch 继续循环。
-    单视频：
+    单视频：读 render_node 写入的显式 video_route 字段（不再用 video_retry_count 计数器推断——
+    计数器推断与 render_node 的重试/彻底失败分支错位一格,会导致第 2 次失败时不带战败
+    ToolMessage 唤醒 agent,触发盲目"二胎"与幽灵卡）：
     - 成功（final_video_path 非空）→ agent（回总结）。
-    - 失败 + retry 未耗尽（video_retry_count < MAX_RETRY）→ resource_prep（复用同 task_id 重做,
-      progress.json 跳过已完成子步只重试 TTS/失败的,同张卡原地从红翻绿,不新建任务/卡）。
-      render_node 失败时已发 render_failed + self_heal 弹幕。
+    - 失败 + retry 未耗尽 → resource_prep（复用同 task_id 重做,progress.json 跳过已完成子步只重试
+      TTS/失败的,同张卡原地从红翻绿,不新建任务/卡）。render_node 失败时已发 render_failed + self_heal 弹幕。
     - 彻底失败（retry 耗尽）→ agent（render_node 已回带真理 ID + 战败宣言的 ToolMessage 唤醒报错）。
     """
     if state.get("batch_queue") is not None:
         return "batch_dispatch"
     if state.get("final_video_path"):
         return "agent"
-    if state.get("video_retry_count", 0) < MAX_RETRY:
-        return "resource_prep"
-    return "agent"
+    # 单视频失败：render_node 已设 video_route。retry→resource_prep / 彻底失败→agent。
+    # video_route 缺失（老 checkpoint 续跑 / 防御）默认 agent,宁可报错也不死循环。
+    return state.get("video_route") or "agent"
