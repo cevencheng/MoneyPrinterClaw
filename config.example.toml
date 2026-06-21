@@ -39,6 +39,7 @@ video_asr_language = "zh"
 
 # ---- 联网搜索(博查AI)----
 bocha_api_key = "sk-your-bocha-key-here"
+search_react_tool_call_limit = 4   # researcher 等 ReAct 子 Agent 单次调用累计工具调用上限；达到后切整理模式产出，避免截断丢失
 
 # ---- 视频素材搜索 ----
 video_pexels_api_keys  = ""    # 逗号分隔的 Pexels API Keys

@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     bocha_api_key: str = ""
     search_proxy: str = ""
     tavily_api_key: str = ""
+    # ReAct 子 Agent（如 researcher）单次调用内累计工具调用上限。达到后切「整理模式」
+    # 追加一轮无工具调用产出 out_field，避免硬截断丢失检索成果。详见 factory.py。
+    search_react_tool_call_limit: int = 4
 
     # ---- Store 配置 ----
     store_backend: str = "sqlite"

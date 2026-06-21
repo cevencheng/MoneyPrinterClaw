@@ -44,7 +44,7 @@ class AgentState(TypedDict):
     video_task_id: str  # bridge 隔离任务目录的 key（video_start 生成）
     video_session_id: str  # 会话 thread_id（= sessions 表主键）；bridge 拼任务目录的 session 段 video_tasks/<session_id>/<task_id>/
     video_topic: str
-    research_notes: str  # researcher 产出的资料（Supervisor 创意阶段；video_start 预置主题种子）
+    research_notes: str  # researcher 产出的资料（Supervisor 创意阶段；video_start 预置主题种子；达搜索上限时由整理模式产出，不丢失）
     script_text: str
     script_review: dict  # reviewer 质检结论 {passed, feedback}（Supervisor 创意阶段）
     storyboard: list

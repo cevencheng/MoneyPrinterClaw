@@ -29,16 +29,18 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from openai import BadRequestError
 
+from agent.config import settings
 from agent.subagents.loader import load_subagent_config
 from agent.subagents.schemas import SCHEMAS, make_chat_model
 
 logger = logging.getLogger(__name__)
 
 
-# ReAct 单轮累计工具调用上限。超过即 should_continue 强制 END,防贪心模型反复调 tool
-# 把上下文撑爆后喂给 LLM 触发 DeepSeek "Content Exists Risk" 风控。
-# 4 = 一次并发 4 个 search 后 LLM 应直接整理产出,不允许再来一轮。
-_REACT_TOOL_CALL_LIMIT = 4
+# ReAct 整理模式追加的通用指令后缀：达到工具调用上限后，让 LLM 基于已检索资料
+# 直接整理输出 out_field，不再调工具（对所有 ReAct worker 通用，目前仅 researcher）。
+_REACT_FINALIZE_SUFFIX = (
+    "\n\n（已达到工具调用次数上限，请基于已获取的信息直接整理输出最终结果，不要再调用任何工具。）"
+)
 
 
 def _content_str(resp: Any) -> str:
@@ -129,10 +131,26 @@ def create_subagent_graph(config_name: str, *, tools_map: dict[str, Any] | None 
 
     elif is_react:
         async def run(state):  # noqa: ANN202
-            # 每次调用时构造,读 settings 最新值,保存后即时生效
-            bound = make_chat_model(temp).bind_tools(tools)
-            prompt = _build_prompt(state)
-            msgs = [SystemMessage(content=prompt)] + list(state.get("sub_messages", []))
+            history = state.get("sub_messages") or []
+            # 累计 ToolMessage 数 = 已完成的工具调用次数。达到上限 → 切「整理模式」：
+            # 不 bind_tools（LLM 物理上无法再调工具）+ 追加整理指令，把已检索资料整理成
+            # out_field 文本。避免原 should_continue 硬截断时 last AIMessage 带 tool_calls、
+            # out_field 不被写入 → 检索成果丢失（搜满上限反而不如主动收手）。
+            tool_count = sum(1 for m in history if isinstance(m, ToolMessage))
+            limit = settings.search_react_tool_call_limit
+            finalize = tool_count >= limit
+            if finalize:
+                bound = make_chat_model(temp)  # 不 bind_tools：强制收尾，不再调工具
+                prompt = _build_prompt(state) + _REACT_FINALIZE_SUFFIX
+                logger.info(
+                    "[subagent/%s] ReAct 达上限 %d（已 %d 调用）→ 整理模式产出 %s",
+                    config_name, limit, tool_count, out_field,
+                )
+            else:
+                # 每次调用时构造,读 settings 最新值,保存后即时生效
+                bound = make_chat_model(temp).bind_tools(tools)
+                prompt = _build_prompt(state)
+            msgs = [SystemMessage(content=prompt)] + list(history)
             try:
                 resp = await bound.ainvoke(msgs)
             except BadRequestError as e:
@@ -153,7 +171,8 @@ def create_subagent_graph(config_name: str, *, tools_map: dict[str, Any] | None 
                     "sub_messages": [AIMessage(content="")],
                 }
             out: dict[str, Any] = {"sub_messages": [resp]}
-            if not getattr(resp, "tool_calls", None):
+            # 整理模式必写 out_field（强制收尾产出）；正常模式仅 last 无 tool_calls 时写
+            if finalize or not getattr(resp, "tool_calls", None):
                 out[out_field] = _content_str(resp)
                 logger.info("[subagent/%s] react done -> %s", config_name, out_field)
             return out
@@ -163,13 +182,13 @@ def create_subagent_graph(config_name: str, *, tools_map: dict[str, Any] | None 
             last = history[-1] if history else None
             if not (last and getattr(last, "tool_calls", None)):
                 return END
-            # 硬限：累计 ToolMessage 数 ≥ _REACT_TOOL_CALL_LIMIT 时强制结束循环
-            # 防贪心模型连续多轮调 tool 撑爆上下文 → 触发 DeepSeek 内容审核 400
+            # 安全网：已达上限仍带 tool_calls（整理模式未生效的极端防御）→ 强制 END，防死循环。
+            # 主路径靠 run 的整理模式（不 bind_tools，LLM 无法返回 tool_calls），此处兜底。
             tool_count = sum(1 for m in history if isinstance(m, ToolMessage))
-            if tool_count >= _REACT_TOOL_CALL_LIMIT:
+            if tool_count >= settings.search_react_tool_call_limit:
                 logger.warning(
-                    "[subagent/%s] ReAct 累计工具调用 %d ≥ %d,强制 END",
-                    config_name, tool_count, _REACT_TOOL_CALL_LIMIT,
+                    "[subagent/%s] ReAct 累计工具调用 %d ≥ %d,安全网强制 END",
+                    config_name, tool_count, settings.search_react_tool_call_limit,
                 )
                 return END
             return "tools"
