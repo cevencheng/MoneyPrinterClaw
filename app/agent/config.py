@@ -46,8 +46,21 @@ class Settings(BaseSettings):
     vector_db_path: str = "storage/vectors"
 
     # ---- 文件路径配置 ----
-    skills_dir: str = "./skills"  # 相对 app/ 工作目录
+    skills_dir: str = "./skills"  # 相对 app/ 工作目录（deprecated：老空目录，未被消费；新机制读 skills_project_dir）
     subagent_configs_dir: str = "./subagents/configs"  # 相对 app/ 工作目录
+
+    # ---- Skills（Agent Skills 标准 client）----
+    # 渐进式披露：启动扫描 SKILL.md → catalog 注入主 agent prompt → activate_skill 拉正文
+    # → run_skill_script 受控执行。详见 agent/skills/。
+    skills_enabled: bool = True
+    skills_project_dir: str = "../.agents/skills"   # 项目级（相对 app/ 工作目录，即 repo 根的 .agents/skills/）
+    skills_user_dir: str = ""                         # 用户级 ~/.agents/skills；空=不扫
+    skills_script_timeout: int = 120                  # 受控脚本执行超时(秒)
+    skills_script_max_output: int = 30000             # 脚本 stdout/stderr 截断字符数（字符,非字节）
+    skills_script_max_resource_bytes: int = 100 * 1024  # read_skill_resource 文件大小上限(B)
+    # 全局环境变量白名单（除基线 PATH/SYSTEMROOT/TEMP/LANG/PYTHONIOENCODING 之外允许灌进 skill 进程的 key）。
+    # 安全核心：第三方 skill 默认拿不到 OPENAI_API_KEY/BOCHA_API_KEY 等机密；想用必须用户显式开洞。
+    skills_env_allowlist: list[str] = []
 
     # ---- 搜索配置 ----
     search_engine: str = "bocha"
