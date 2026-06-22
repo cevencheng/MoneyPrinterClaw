@@ -24,6 +24,7 @@
     "radix-ui": "^1.5.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
     "react-shiki": "^0.10.1",
     "remark-gfm": "^4.0.1",
     "shadcn": "^4.11.0",
