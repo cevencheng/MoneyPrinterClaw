@@ -19,7 +19,6 @@
 
 import { apiUrl } from "@/lib/chat-adapter";
 import { Button } from "@/components/ui/button";
-import { SkillsTab } from "@/components/skills/SkillsTab";
 import {
   AlertCircleIcon,
   ArrowLeftIcon,
@@ -27,8 +26,6 @@ import {
   EyeIcon,
   EyeOffIcon,
   Loader2Icon,
-  SettingsIcon,
-  PackageIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -86,24 +83,6 @@ const GROUPS = [
 // ─── 组件 ────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  // tab 切换：URL ?tab=skills 同步;默认 general。
-  const [tab, setTab] = useState<"general" | "skills">("general");
-  useEffect(() => {
-    // 客户端读 URL params,避免 SSR/hydration mismatch
-    if (typeof window === "undefined") return;
-    const t = new URL(window.location.href).searchParams.get("tab");
-    if (t === "skills") setTab("skills");
-  }, []);
-  const switchTab = (next: "general" | "skills") => {
-    setTab(next);
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      if (next === "general") url.searchParams.delete("tab");
-      else url.searchParams.set("tab", next);
-      window.history.replaceState({}, "", url.toString());
-    }
-  };
-
   const [meta, setMeta] = useState<Record<string, FieldMeta>>({});
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
@@ -249,7 +228,7 @@ export default function SettingsPage() {
 
   return (
     <div
-      className={`h-dvh bg-background settings-scroll ${
+      className={`h-full w-full flex-1 min-w-0 overflow-y-auto bg-background settings-scroll ${
         isScrolling ? "is-scrolling" : ""
       }`}
       onScroll={onScroll}
@@ -264,51 +243,19 @@ export default function SettingsPage() {
             <ArrowLeftIcon className="size-4" />
             返回对话
           </Link>
-          <h1 className="flex-1 text-2xl font-bold">
-            {tab === "skills" ? "Skills 管理" : "全局配置"}
-          </h1>
+          <h1 className="flex-1 text-2xl font-bold">全局配置</h1>
         </div>
 
-        {/* Tab 切换 */}
-        <div className="mb-6 flex gap-2 border-b border-border/60">
-          <button
-            onClick={() => switchTab("general")}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-              tab === "general"
-                ? "border-foreground text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <SettingsIcon className="size-4" />
-            通用配置
-          </button>
-          <button
-            onClick={() => switchTab("skills")}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-              tab === "skills"
-                ? "border-foreground text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <PackageIcon className="size-4" />
-            Skills 管理
-          </button>
-        </div>
-
-        {tab === "skills" ? (
-          <SkillsTab />
-        ) : (
-          <>
-            {/* 提示条 */}
-            <div className="mb-6 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
-              <AlertCircleIcon className="size-4 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-medium">保存后即时生效，无需重启</div>
-                <div className="mt-0.5 text-xs text-amber-700/80 dark:text-amber-400/80">
-                  API Key 与模型配置保存后即写入 config.toml 并刷新内存；下一次对话或工具调用自动使用新值。
-                </div>
-              </div>
+        {/* 提示条 */}
+        <div className="mb-6 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
+          <AlertCircleIcon className="size-4 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-medium">保存后即时生效，无需重启</div>
+            <div className="mt-0.5 text-xs text-amber-700/80 dark:text-amber-400/80">
+              API Key 与模型配置保存后即写入 config.toml 并刷新内存；下一次对话或工具调用自动使用新值。
             </div>
+          </div>
+        </div>
 
         {/* 加载中 */}
         {loading && (
@@ -411,8 +358,6 @@ export default function SettingsPage() {
               )}
             </Button>
           </div>
-        )}
-          </>
         )}
       </div>
     </div>
