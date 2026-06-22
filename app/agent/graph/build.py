@@ -19,6 +19,7 @@ from agent.nodes.video_nodes import (
     batch_redo_start_node,
     batch_start_node,
     batch_summary_node,
+    creative_fail_node,
     render_node,
     request_review_node,
     resource_prep_node,
@@ -259,6 +260,8 @@ async def build_agent(checkpointer):
     workflow.add_node("request_review", request_review_node)
     workflow.add_node("resource_prep", resource_prep_node)
     workflow.add_node("render", render_node)
+    # 创意期熔断节点：supervisor_route_after 审计 storyboard 不合格且超限时变轨到此
+    workflow.add_node("creative_fail", creative_fail_node)
 
     workflow.set_entry_point("agent")
     workflow.add_conditional_edges("agent", should_continue)
@@ -271,12 +274,15 @@ async def build_agent(checkpointer):
     # 每个 worker 干完回 supervisor_route（微观调度循环）
     for w in WORKERS:
         workflow.add_edge(w, "supervisor_route")
-    # supervisor_route →(命中 worker) 该 worker / (FINISH/超上限) after_creative 判定 → request_review（逐个审）/ resource_prep（跳审稿）
-    workflow.add_conditional_edges("supervisor_route", supervisor_route_after, [*WORKERS, "request_review", "resource_prep"])
+    # supervisor_route →(命中 worker) 该 worker / (FINISH/超上限) after_creative 判定 → request_review（逐个审）/ resource_prep（跳审稿）/ creative_fail（分镜熔断）
+    workflow.add_conditional_edges("supervisor_route", supervisor_route_after, [*WORKERS, "request_review", "resource_prep", "creative_fail"])
     workflow.add_edge("request_review", "resource_prep")
     workflow.add_edge("resource_prep", "render")
     # render → batch_dispatch（批量循环）/ resource_prep（单视频失败局部重试,复用同 task_id 同卡）/ agent（单视频成功或彻底失败回总结）
     workflow.add_conditional_edges("render", after_render, ["batch_dispatch", "resource_prep", "agent"])
+    # creative_fail 熔断后复用 after_render 路由：批量场景 batch_queue is not None → batch_dispatch 继续下一轮；
+    # 单视频场景 video_route=agent → agent（带战败 ToolMessage）。熔断未进 render,但路由语义一致,复用之。
+    workflow.add_conditional_edges("creative_fail", after_render, ["batch_dispatch", "resource_prep", "agent"])
     workflow.add_edge("batch_summary", "agent")
     # 补做失败轮：batch_redo_start →(有失败轮) batch_dispatch / (无失败轮) agent
     workflow.add_conditional_edges("batch_redo_start", after_redo_start, ["batch_dispatch", "agent"])

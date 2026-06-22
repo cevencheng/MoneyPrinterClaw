@@ -117,7 +117,24 @@ def create_subagent_graph(config_name: str, *, tools_map: dict[str, Any] | None 
                 schema, method=so.get("method", "json_mode")
             )
             prompt = _build_prompt(state)
-            result = await bound.ainvoke([SystemMessage(content=prompt)])
+            try:
+                result = await bound.ainvoke([SystemMessage(content=prompt)])
+            except (BadRequestError, Exception) as e:
+                # DeepSeek 风控（"Content Exists Risk"）/ JSON 破损 / OutputParserException 等：
+                # 异常击穿 LangGraph stream 会让 SSE 流断、前端卡片永久卡住。对齐 ReAct 模式的
+                # BadRequestError 降级——置空 out_field,让创意期咽喉审计（supervisor_route_node 的
+                # _storyboard_valid）判定不合格 → 重派 director 或熔断 creative_fail,不再击穿流。
+                msg_text = str(e)
+                is_content_risk = "Content Exists Risk" in msg_text or "content_filter" in msg_text.lower()
+                logger.warning(
+                    "[subagent/%s] structured 解析失败 %s -> 降级 %s='' (空/列表置空)",
+                    config_name,
+                    "内容风控" if is_content_risk else f"{type(e).__name__}({msg_text[:120]})",
+                    out_field,
+                )
+                # flatten_key 模式（如 director 的 shots）置空 list；否则置空值
+                value = [] if flatten_key else ""
+                return {out_field: value}
             value = (
                 [x.model_dump() for x in getattr(result, flatten_key)]
                 if flatten_key

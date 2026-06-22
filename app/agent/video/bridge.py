@@ -230,6 +230,39 @@ async def _emit_render_failed(
         logger.debug("[bridge] render_failed skipped (no stream context): %s", task_id)
 
 
+async def _emit_creative_failed(
+    task_id: str,
+    *,
+    batch_index: int | None = None,
+    batch_total: int | None = None,
+    topic: str = "",
+    reason: str = "",
+) -> None:
+    """创意期熔断：分镜不合格且超限 → 发 creative_failed 事件 → chat.py 给该轮 render_video 卡
+    发 stage=failed（翻红）。区别于 render_failed（渲染车间失败），这是创意期就熔断、未进车间。
+
+    复用前端 stage=failed 渲染（失败卡 + 重试按钮），无需前端新增态。reason 透传失败原因
+    （分镜为空 / search_prompt 缺失）便于排查。
+    """
+    logger.info(
+        "[video/creative_failed] task=%s batch=%s/%s reason=%s",
+        task_id, batch_index, batch_total, reason or "(未提供)",
+    )
+    try:
+        await adispatch_custom_event(
+            "creative_failed",
+            {
+                "task_id": task_id,
+                "batch_index": batch_index,
+                "batch_total": batch_total,
+                "topic": topic,
+                "reason": reason,
+            },
+        )
+    except RuntimeError:
+        logger.debug("[bridge] creative_failed skipped (no stream context): %s", task_id)
+
+
 async def _emit_self_heal(
     task_id: str,
     retry_count: int,
