@@ -172,3 +172,49 @@ async def grant_env_allowlist(request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{name}/content")
+async def get_skill_content(name: str) -> dict:
+    """返回 skill 的 SKILL.md 正文 + requires_env + 已授权 env 子集 + 来源/安装时间。
+
+    供 /skills 路由右侧详情视图调用。
+    """
+    import json
+
+    from agent.config import settings
+    from agent.skills.loader import activate
+
+    result = activate(name)
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail=f"skill '{name}' 不存在或 SKILL.md 不可读",
+        )
+
+    meta = result["meta"]
+    requires_env = list(meta.requires_env)
+    allowed = set(settings.skills_env_allowlist or [])
+
+    # 读 .install.json（如有）拿 installed_at + source_type
+    source = _classify_source(meta.location)
+    installed_at = ""
+    install_meta_path = Path(meta.location) / ".install.json"
+    if install_meta_path.is_file():
+        try:
+            install_meta = json.loads(install_meta_path.read_text(encoding="utf-8"))
+            installed_at = install_meta.get("installed_at", "")
+        except (OSError, ValueError):
+            pass
+
+    return {
+        "name": name,
+        "description": meta.description,
+        "version": meta.version,
+        "content": result["content"],
+        "resources": result["resources"],
+        "requires_env": requires_env,
+        "allowed_env": [k for k in requires_env if k in allowed],
+        "source": source,
+        "installed_at": installed_at,
+    }
