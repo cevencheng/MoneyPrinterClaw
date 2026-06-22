@@ -34,12 +34,21 @@ export const ThreadList: FC<ThreadListProps> = ({ pagination, collapsed = false 
   }
   return (
     <ThreadListPrimitive.Root className="aui-root aui-thread-list-root flex h-full min-h-0 flex-col">
-      {/* 固定顶部：新建按钮 */}
-      <div className="shrink-0 px-1.5 pt-1.5">
+      {/* 区域 1：新建任务 CTA（独立黄金视区，物理隔离 hover 污染） */}
+      <div className="shrink-0 px-2.5 pt-2.5">
         <ThreadListNew />
       </div>
-      {/* 滚动区：列表 + 哨兵（IntersectionObserver 触底加载下一页） */}
-      <div className="aui-thread-list-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1.5 pb-2">
+
+      {/* 物理防线：固定间距隔离带 + 极淡分割线 + 群组标头 */}
+      <div className="mt-4 mb-2 px-3 flex flex-col gap-2 shrink-0">
+        <div className="h-[1px] w-full bg-slate-200/60 dark:bg-slate-800/60" />
+        <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
+          近期任务
+        </span>
+      </div>
+
+      {/* 区域 2：会话历史滚动容器（hover 背景被锁在此 nav 内,不外溢） */}
+      <nav className="aui-thread-list-scroll flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1.5 pb-2 pr-1 mt-1">
         <AuiIf condition={(s) => s.threads.isLoading}>
           <ThreadListSkeleton />
         </AuiIf>
@@ -51,7 +60,7 @@ export const ThreadList: FC<ThreadListProps> = ({ pagination, collapsed = false 
           isLoading={pagination.isLoadingMore}
           onLoadMore={pagination.loadMore}
         />
-      </div>
+      </nav>
     </ThreadListPrimitive.Root>
   );
 };
@@ -145,8 +154,18 @@ const ThreadListNew: FC<{ collapsed?: boolean }> = ({ collapsed = false }) => {
     );
   }
   return (
-    <ThreadListPrimitive.New render={<Button variant="ghost" className="aui-thread-list-new hover:bg-muted data-active:bg-muted h-11 justify-start gap-2 rounded-md px-2.5 text-sm font-normal" />}><PlusIcon className="size-4" />新建视频任务
-            </ThreadListPrimitive.New>
+    <ThreadListPrimitive.New
+      render={
+        <button
+          type="button"
+          title="新建视频任务"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 shadow-sm hover:shadow transition-all duration-200 rounded-xl font-medium text-sm text-slate-800 dark:text-slate-200 cursor-pointer"
+        />
+      }
+    >
+      <PlusIcon className="size-4" strokeWidth={2.5} />
+      新建视频任务
+    </ThreadListPrimitive.New>
   );
 };
 
@@ -227,7 +246,7 @@ const LoadMoreSentinel: FC<LoadMoreSentinelProps> = ({
 
 const ThreadListItem: FC = () => {
   return (
-    <ThreadListItemPrimitive.Root className="aui-thread-list-item group flex items-center gap-1 rounded-md border-l-4 border-transparent py-3 transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none data-active:border-blue-500 data-active:bg-blue-500/10 data-active:font-semibold">
+    <ThreadListItemPrimitive.Root className="aui-thread-list-item group flex items-center gap-1 rounded-md border-l-4 border-transparent py-3 transition-colors hover:bg-slate-200/50 dark:hover:bg-slate-800/50 focus-visible:bg-muted focus-visible:outline-none data-active:border-blue-500 data-active:bg-blue-500/10 data-active:font-semibold">
       <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger flex h-full min-w-0 flex-1 items-center px-2.5 text-start text-sm">
         <span className="aui-thread-list-item-title min-w-0 flex-1 truncate">
           <ThreadListItemPrimitive.Title fallback="New Chat" />
