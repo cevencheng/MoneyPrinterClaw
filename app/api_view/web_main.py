@@ -19,6 +19,7 @@ from api_view.web_config import API_TITLE, API_VERSION, API_DESCRIPTION
 from api_view.api.chat import router as chat_router
 from api_view.api.history import router as history_router
 from api_view.api.settings import router as settings_router
+from api_view.api.skills import router as skills_router
 from api_view.api.threads import router as threads_router
 from api_view.database import close_db, init_db
 from api_view.agent_runtime import close_agent_graph, init_agent_graph
@@ -107,6 +108,7 @@ app.include_router(chat_router, prefix="/api/chat", tags=["对话"])
 app.include_router(threads_router, prefix="/api/threads", tags=["会话管理"])
 app.include_router(history_router, prefix="/api/history", tags=["历史记录"])
 app.include_router(settings_router, prefix="/api/settings", tags=["全局配置"])
+app.include_router(skills_router, prefix="/api/skills", tags=["Skills 管理"])
 
 # 静态文件服务：视频产物（与 bridge 写入目录完全一致）
 app.mount("/api/files", StaticFiles(directory=tasks_root()), name="video_files")
