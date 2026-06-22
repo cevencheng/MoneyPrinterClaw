@@ -21,7 +21,7 @@ from agent.skills.tools import (
 def test_discovers_real_skills():
     """settings 默认指向 .agents/skills/,refresh 后应找到 2 个 MVP skill。"""
     settings.skills_enabled = True
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     # 强制使用默认值（其他测试可能修改过）
     settings.skills_project_dir = "../.agents/skills"
     refresh_skills()
@@ -78,7 +78,7 @@ async def test_full_build_agent_e2e():
     """完整 build_agent 编译后,主图能注册所有节点且 skill 工具可用。"""
     settings.skills_enabled = True
     settings.skills_project_dir = "../.agents/skills"
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     from langgraph.checkpoint.memory import MemorySaver
     from agent.graph.build import build_agent
 

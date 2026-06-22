@@ -88,11 +88,14 @@ def discover_skills() -> list[SkillMeta]:
 
     # user 先扫
     user_dir = settings.skills_user_dir.strip()
-    if user_dir:
-        user_path = Path(os.path.expanduser(user_dir))
-        if user_path.is_dir():
-            for meta in _scan_dir(user_path):
-                by_name[meta.name] = meta
+    if not user_dir:
+        # 默认 fallback 到 ~/.agents/skills/（与 installer.INSTALL_BASE 对齐）。
+        # 让 CLI / webui 装的 skill 不需要用户手动改 settings.skills_user_dir 就可被发现。
+        user_dir = "~/.agents/skills"
+    user_path = Path(os.path.expanduser(user_dir))
+    if user_path.is_dir():
+        for meta in _scan_dir(user_path):
+            by_name[meta.name] = meta
 
     # project 后扫（覆盖 user）
     project_dir = settings.skills_project_dir.strip()

@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # 全局环境变量白名单（除基线 PATH/SYSTEMROOT/TEMP/LANG/PYTHONIOENCODING 之外允许灌进 skill 进程的 key）。
     # 安全核心：第三方 skill 默认拿不到 OPENAI_API_KEY/BOCHA_API_KEY 等机密；想用必须用户显式开洞。
     skills_env_allowlist: list[str] = []
+    # GitHub Personal Access Token（可选）：用于 skill 安装时调 GitHub REST API。
+    # 空 = 匿名访问（60 次/小时速率限制,装常用公共 skill 够用）；非空 = 5000 次/小时。
+    github_token: str = ""
 
     # ---- 搜索配置 ----
     search_engine: str = "bocha"

@@ -30,7 +30,7 @@ async def test_build_with_skills(tmp):
     _write_skill(tmp, "alpha", description="alpha task handler")
     _write_skill(tmp, "beta", description="beta task handler")
     settings.skills_project_dir = str(tmp)
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     settings.skills_enabled = True
 
     # 重 import build 模块以重置 logger / 确保最新代码
@@ -77,7 +77,7 @@ def test_catalog_in_system_prompt():
     # 启用 + 无 skill → 空串
     settings.skills_enabled = True
     settings.skills_project_dir = "/tmp/__nonexistent__"
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     refresh_skills()
     assert render_catalog_prompt() == ""
     print("  PASS catalog_prompt_empty_no_skill")

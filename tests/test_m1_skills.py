@@ -28,7 +28,7 @@ def _write_skill(root: Path, name: str, *, description="", reqenv=None, fm_name=
 def test_basic_discovery(tmp):
     _write_skill(tmp, "alpha", description="alpha skill description")
     settings.skills_project_dir = str(tmp)
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     settings.skills_enabled = True
     metas = discover_skills()
     assert len(metas) == 1, f"want 1, got {len(metas)}"
@@ -86,14 +86,14 @@ def test_project_overrides_user(tmp):
     shared = [m for m in metas if m.name == "shared"]
     assert len(shared) == 1 and shared[0].description == "project version"
     print(f"  PASS project_overrides_user: {shared[0].description}")
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
 
 
 def test_cow_atomic_refresh(tmp):
     for i in range(20):
         _write_skill(tmp, f"sk{i:02d}", description=f"skill {i}")
     settings.skills_project_dir = str(tmp)
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     refresh_skills()
 
     stop = threading.Event()
@@ -148,7 +148,7 @@ def test_loader_activate(tmp):
     (skill_dir / "references" / "doc.md").write_text("ref doc", encoding="utf-8")
     settings.skills_project_dir = str(tmp)
     settings.skills_enabled = True
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     refresh_skills()
     result = loader.activate("epsilon")
     assert result is not None
@@ -172,7 +172,7 @@ def test_catalog_render(tmp):
     _write_skill(tmp, "eta", description="eta task handler")
     settings.skills_project_dir = str(tmp)
     settings.skills_enabled = True
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     refresh_skills()
     text = catalog.render_catalog_prompt()
     assert "## " in text
@@ -183,7 +183,7 @@ def test_catalog_render(tmp):
 
 def test_catalog_empty_when_no_skills(tmp):
     settings.skills_project_dir = str(tmp)
-    settings.skills_user_dir = ""
+    settings.skills_user_dir = "/__nonexistent_user_dir_for_test__"
     refresh_skills()
     assert catalog.render_catalog_prompt() == ""
     print("  PASS catalog_empty_when_no_skills")

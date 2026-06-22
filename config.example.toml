@@ -51,6 +51,9 @@ skills_script_max_resource_bytes = 102400           # read_skill_resource 文件
 # 环境变量白名单：除 PATH/SYSTEMROOT/TEMP/LANG/PYTHONIOENCODING 外，允许灌进 skill 进程的 key。
 # 默认空 = 第三方 skill 拿不到任何业务密钥；用到 Pexels/OpenAI 等需用户显式列入此项。
 skills_env_allowlist = []
+# GitHub Personal Access Token（可选）：用于 skill 安装时调 GitHub REST API。
+# 空 = 匿名 60 次/小时；非空 = 5000 次/小时。生成路径：github.com/settings/tokens (scope 选 public_repo)
+github_token = ""
 
 # ---- 视频素材搜索 ----
 video_pexels_api_keys  = ""    # 逗号分隔的 Pexels API Keys
