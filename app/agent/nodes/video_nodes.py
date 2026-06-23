@@ -83,6 +83,9 @@ def _prepare_video_round(topic: str, font_size: int = 0) -> dict:
         # 直接彻底失败（甚至死循环）。每轮新视频强制清零，恢复完整重试预算。
         "video_retry_count": 0,
         "video_route": "",
+        # 分镜熔断重试计数归零（同上）：上个视频若因分镜不合格熔断会留下非零计数,
+        # 本视频 director 首次产出不合格就会被误判超限直接熔断。每轮新视频强制清零。
+        "director_retry_count": 0,
     }
 
 
@@ -151,10 +154,17 @@ async def resource_prep_node(state):
     if not task_id or not script:
         return {"audio_paths": [], "video_clips": [], "timeline_config": {"error": "missing task_id/script"}}
 
-    # 任务级 meta：把 topic + 原始文案写到 progress.json 顶层,方便事后对比 ASR 字幕(.ass) 与原稿
-    bridge.mark_meta(task_id, session_id=session_id, topic=topic, script_text=script)
-
     search_terms = [s.get("search_prompt", "") for s in shots if s.get("search_prompt")]
+
+    # 任务级 meta：把 topic + 原始文案 + 分镜 + 搜索关键词写到 progress.json 顶层。
+    # storyboard / search_terms 落盘便于事后排查"为何这条视频素材为空"类问题
+    # （director 生成空分镜 → search_terms 空 → resource_prep 跳过下载 → videos=0）。
+    # mark_meta 幂等,每次 resource_prep（含补做重跑）覆盖写最新值。
+    bridge.mark_meta(
+        task_id, session_id=session_id,
+        topic=topic, script_text=script,
+        storyboard=shots, search_terms=search_terms,
+    )
 
     # ---- audio 步（TTS 纯音频）----
     if bridge.step_is_done(task_id, "audio", session_id=session_id):
@@ -497,6 +507,8 @@ async def batch_dispatch_node(state, config):
                 # 失败重试计数 + 路由标志归零（同 _prepare_video_round）：补做轮恢复完整重试预算
                 "video_retry_count": 0,
                 "video_route": "",
+                # 分镜熔断重试计数归零（同 _prepare_video_round）：补做降级 creative 重跑时恢复完整预算
+                "director_retry_count": 0,
                 # 有 script → 跳 creative 直接 resource_prep；无 script（历史数据/creative 崩）→ 降级 creative 重生成
                 "batch_route": "resource_prep" if script else "supervisor_route",
             }
@@ -555,6 +567,14 @@ def batch_summary_node(state):
 
     tool_call_id 优先取 state.batch_tool_call_id（batch_start 持久化）；
     回退反查 messages 仅作兼容（messages 被 keep_last_k 截断后反查可能失败,故不依赖之）。
+
+    补做收尾的重复应答防护：首次 batch_summary 已写过一条 ToolMessage(PVB_id)（对准
+    plan_video_batch 的 tool_call_id）。用户点重试 → batch_redo_start 重跑补做 → 补做收尾
+    batch_summary 再写一条同 id 的 ToolMessage → 同 tool_call_id 出现两条,且第二条前面
+    不是 AIMessage(tool_calls) → DeepSeek 严格校验 400 "tool must be response to preceding
+    tool_calls"。检测到 state.messages 已有同 tool_call_id 的 ToolMessage → 改回 HumanMessage
+    （无需配对 AIMessage(tool_calls),不触发 400）。首次 batch_summary 窗口内无重复 → 仍走
+    ToolMessage 路径,与此防护不冲突。
     """
     results = state.get("batch_results", [])
     tool_call_id = state.get("batch_tool_call_id", "") or _extract_plan_video_batch(state)[2]
@@ -565,8 +585,21 @@ def batch_summary_node(state):
         for i, r in enumerate(results)
     ]
     content = f"批量创作完成：{ok}/{len(results)} 个视频成功。\n" + "\n".join(lines)
-    msgs = [ToolMessage(content=content, tool_call_id=tool_call_id)] if tool_call_id else []
-    logger.info("[video/batch_summary] %d/%d ok", ok, len(results))
+
+    already_responded = False
+    if tool_call_id:
+        for m in state.get("messages", []):
+            if isinstance(m, ToolMessage) and getattr(m, "tool_call_id", "") == tool_call_id:
+                already_responded = True
+                break
+
+    if already_responded:
+        # 补做收尾：首次的 ToolMessage(PVB_id) 已在窗口内,改 HumanMessage 避免同 id 双响 → 400
+        msgs = [HumanMessage(content=content)]
+        logger.info("[video/batch_summary] %d/%d ok（改 HumanMessage：同 tool_call_id 已应答过）", ok, len(results))
+    else:
+        msgs = [ToolMessage(content=content, tool_call_id=tool_call_id)] if tool_call_id else []
+        logger.info("[video/batch_summary] %d/%d ok", ok, len(results))
     return {"messages": msgs}
 
 
@@ -588,13 +621,33 @@ def batch_redo_start_node(state):
 
     入口 A（redo_failed_videos 工具）需回对应 tool_call_id 的 ToolMessage（避免孤儿 tool_call）；
     入口 B（/redo-failed 端点 Command goto）无 tool_call_id → 回 HumanMessage。
+
+    入口 A 重复应答防护：agent 可能多次调用 redo_failed_videos（补做收尾后 agent 见仍有失败再调一次），
+    每次进 batch_redo_start 时 _extract_redo_failed_tool_call_id 反查 messages 都命中同一条
+    redo_failed_videos 的 AIMessage → 用同一 tool_call_id 写第二条 ToolMessage → 同 id 双响,
+    第二条前面不是 AIMessage(tool_calls) → DeepSeek 400。检测 messages 已有同 redo_id 的
+    ToolMessage → 改 HumanMessage（无需配对 AIMessage(tool_calls)）。首次入口 A 窗口内无重复
+    → 仍走 ToolMessage 路径。
     """
     results = list(state.get("batch_results", []))
     failed = [(i, r) for i, r in enumerate(results) if not r.get("final_video_path") and r.get("task_id")]
     redo_id = _extract_redo_failed_tool_call_id(state)
 
+    # 入口 A 重复应答检测：messages 已有同 redo_id 的 ToolMessage → 改 HumanMessage
+    redo_already_responded = False
+    if redo_id:
+        for m in state.get("messages", []):
+            if isinstance(m, ToolMessage) and getattr(m, "tool_call_id", "") == redo_id:
+                redo_already_responded = True
+                break
+
     def _reply(content: str):
-        return ToolMessage(content=content, tool_call_id=redo_id) if redo_id else HumanMessage(content=content)
+        if not redo_id:
+            return HumanMessage(content=content)
+        if redo_already_responded:
+            # 同 redo_id 已应答过,改 HumanMessage 避免第二条 ToolMessage 触发 400
+            return HumanMessage(content=content)
+        return ToolMessage(content=content, tool_call_id=redo_id)
 
     if not failed:
         logger.info("[video/batch_redo_start] 无失败轮，跳过补做 → agent")
@@ -616,6 +669,73 @@ def batch_redo_start_node(state):
         "batch_index": 0,  # batch_dispatch 会用 original_index 覆盖
         "batch_results": results,  # 保留成功轮；补做成功后由 batch_dispatch upsert 原地更新
         "messages": [_reply(f"开始补做 {len(redo_queue)} 个失败视频（复用原任务，跳过已完成子步）。")],
+    }
+
+
+async def creative_fail_node(state):
+    """创意期熔断节点：supervisor_route_after 审计 storyboard 不合格且 director 重试超限时变轨到此。
+
+    复用 render_node 彻底失败的 batch_results upsert 记账模板（失败 entry: {topic, task_id,
+    final_video_path="", script_text, storyboard}），向前端发 creative_failed 事件翻红卡，
+    设 video_route="agent" 让 after_render 条件边丝滑顺延——批量场景回 batch_dispatch 继续
+    下一轮，单视频场景回 agent（带战败 ToolMessage 钳制报错、封死盲目"二胎"）。
+
+    核心价值：在创意期就熔断，不推进到 TTS/ASR/素材下载/渲染车间，避免对注定失败的
+    残次品（空分镜 / search_prompt 缺失）浪费下游算力。失败 entry 进 batch_results →
+    batch_redo_start 的失败轮补做机制天然能取到 → 前端失败卡重试按钮可用（补做降级
+    creative 重生成，给 director 重新出合格分镜的机会）。
+    """
+    task_id = state.get("video_task_id", "")
+    session_id = state.get("video_session_id", "")
+    topic = state.get("video_topic", "")
+    batch_index = state.get("batch_index")
+    batch_total = state.get("batch_total")
+    shots = state.get("storyboard") or []
+    # 失败原因：空分镜 / search_prompt 缺失，便于排查与前端展示
+    if not shots:
+        reason = "分镜为空（director 未产出有效分镜）"
+    else:
+        missing = sum(1 for s in shots if isinstance(s, dict) and not (s.get("search_prompt") or "").strip())
+        reason = f"分镜不合格（{missing}/{len(shots)} 个镜头缺少检索词 search_prompt）"
+
+    logger.warning("[video/creative_fail] task=%s 熔断 reason=%s", task_id, reason)
+
+    # 向前端翻红卡（复用 stage=failed 渲染，失败卡 + 重试按钮）
+    await bridge._emit_creative_failed(
+        task_id, batch_index=batch_index, batch_total=batch_total, topic=topic, reason=reason,
+    )
+
+    # 失败登记进 batch_results（复用 render_node 彻底失败的 upsert 模板）
+    batch_results = list(state.get("batch_results", []) or [])
+    existing = next((r for r in batch_results if r.get("task_id") == task_id), None)
+    if existing:
+        existing["final_video_path"] = ""
+        existing["script_text"] = existing.get("script_text") or state.get("script_text", "")
+        existing["storyboard"] = existing.get("storyboard") or state.get("storyboard", [])
+    else:
+        batch_results.append({
+            "topic": topic,
+            "task_id": task_id,
+            "final_video_path": "",
+            "script_text": state.get("script_text", ""),
+            "storyboard": state.get("storyboard", []),
+        })
+
+    # 单视频场景回 agent 的战败 ToolMessage（钳制报错、封死盲目"二胎"）；批量场景 after_render
+    # 见 batch_queue is not None 直接回 batch_dispatch，此 ToolMessage 不影响批量顺延。
+    _, tool_call_id, _ = _extract_plan_video(state)
+    defeat_content = (
+        f"Error: 视频创作在创意期熔断——{reason}。director 经 {MAX_RETRY + 1} 次重试仍无法产出"
+        f"合格分镜，已停止推进到渲染车间。请停止重试，直接向用户报错并陈述原因。"
+    )
+    msgs = [ToolMessage(content=defeat_content, tool_call_id=tool_call_id)] if tool_call_id else []
+
+    return {
+        "messages": msgs,
+        "batch_results": batch_results,
+        "video_retry_count": 0,  # 熔断 reset,供下次新任务/补做
+        "director_retry_count": 0,  # 熔断 reset,补做降级 creative 时恢复完整预算
+        "video_route": "agent",  # after_render 据此路由：批量→batch_dispatch / 单视频→agent
     }
 
 

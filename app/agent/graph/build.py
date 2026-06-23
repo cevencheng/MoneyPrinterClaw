@@ -19,6 +19,7 @@ from agent.nodes.video_nodes import (
     batch_redo_start_node,
     batch_start_node,
     batch_summary_node,
+    creative_fail_node,
     render_node,
     request_review_node,
     resource_prep_node,
@@ -26,6 +27,13 @@ from agent.nodes.video_nodes import (
 )
 from agent.subagents.factory import create_subagent_graph
 from agent.supervisor.builder import WORKERS, supervisor_route_after, supervisor_route_node
+from agent.skills import (
+    activate_skill,
+    read_skill_resource,
+    refresh_skills,
+    render_catalog_prompt,
+    run_skill_script,
+)
 from agent.tools.plan_video import plan_video
 from agent.tools.plan_video_batch import plan_video_batch
 from agent.tools.redo_failed_videos import redo_failed_videos
@@ -49,7 +57,8 @@ SYSTEM_PROMPT = """\
 6. 当用户要求"一次做多个 / 批量做 N 条"视频时，调用 plan_video_batch 工具，并务必把大主题拆成**不同角度的差异化主题**（如"咖啡"→ 历史/手冲教程/健康误区/文化…），严禁雷同。
 7. **严禁在同一轮回复中并行调用多个 plan_video**（会触发工具协议错误，导致流水线中断）。需要制作多个视频时，必须用 `plan_video_batch` 一次调用；单次回复最多只调用一个 `plan_video`。
 8. 批量视频完成后，若汇总显示有失败的视频（网络抖动、渲染偶发崩溃等），应主动询问用户"是否补做失败的"。用户同意后调用 `redo_failed_videos`（无需参数，系统自动复用原任务、只重做失败步骤）。用户也可在前端失败卡片上点"重试"。
-9. 用户提到字幕大小（"小一点/大一点/字号N/字幕调小"）时，调用 plan_video/plan_video_batch 传 `subtitle_size` 参数：模糊词按 小=14、中=20、大=28、超大=36 取值，用户给具体数字就直接用。用户没提字幕大小就不传该参数。\
+9. 用户提到字幕大小（"小一点/大一点/字号N/字幕调小"）时，调用 plan_video/plan_video_batch 传 `subtitle_size` 参数：模糊词按 小=14、中=20、大=28、超大=36 取值，用户给具体数字就直接用。用户没提字幕大小就不传该参数。
+10. **Skills 使用流程（如果 system prompt 后续列出了「可用技能」清单）**：当用户任务匹配某个 skill 的描述时，先调用 `activate_skill(name)` 加载完整指令，按指令再调 `run_skill_script` 跑脚本或 `read_skill_resource` 读参考。绝对禁止虚构清单外的 skill name；脚本失败时看 stderr 自行决定重试还是换法。\
 """
 
 
@@ -107,7 +116,16 @@ def _sanitize_messages(messages: list) -> list:
 async def build_agent(checkpointer):
     """编译带 Checkpointer 的 LangGraph Agent（主图内联视频流程 + HITL 断点）"""
 
+    # Skills 启动扫描：refresh_skills 内部按 skills_enabled 分支
+    # （禁用时清空缓存,启用时扫描）。不能短路成 if-else,否则禁用时残留旧缓存污染状态。
+    skill_count = refresh_skills()
+    if skill_count:
+        logger.info("[build] 加载了 %d 个 skill 到 catalog", skill_count)
+
     tools = [web_search, plan_video, plan_video_batch, redo_failed_videos]
+    # 启用 skills 时追加 3 个工具给主 agent（关闭时不绑,LLM 完全看不到）。
+    if settings.skills_enabled:
+        tools.extend([activate_skill, run_skill_script, read_skill_resource])
 
     # 创意中枢扁平化：4 个 worker 子图平铺为主图节点 + supervisor_route 裸节点。
     # tools_map 透传给 worker 工厂（researcher 需要 web_search）。
@@ -125,8 +143,13 @@ async def build_agent(checkpointer):
         ).bind_tools(tools)
         # 动态注入当前北京时间，作为模型处理时效性任务的唯一时间锚点。
         current_time = datetime.now(CST).strftime("%Y年%m月%d日 %H:%M:%S %A")
+        # Skills catalog：每次调用从 COW 缓存读最新快照,新增 skill 后 refresh_skills() 即生效,
+        # 无需重启图。catalog 为空 / skills_enabled=False 时返回空串,不污染 prompt。
+        catalog_block = render_catalog_prompt()
+        catalog_section = f"\n\n{catalog_block}" if catalog_block else ""
         dynamic_prompt = (
-            f"{SYSTEM_PROMPT}\n\n"
+            f"{SYSTEM_PROMPT}"
+            f"{catalog_section}\n\n"
             f"【系统时间】现在是北京时间：{current_time}。\n"
             "处理天气、赛事、股市、新闻等一切时效性任务时，"
             "必须严格以此时间为「今天」的唯一基准，绝不假设或使用过期日期。"
@@ -217,7 +240,12 @@ async def build_agent(checkpointer):
 
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", agent_node)
-    workflow.add_node("tools", ToolNode([web_search]))
+    # ToolNode 注册真实执行的工具：web_search + 启用时的 3 个 skill 工具。
+    # plan_video / plan_video_batch / redo_failed_videos 是虚拟工具不进 ToolNode（由 should_continue 路由专用节点）。
+    real_tools = [web_search]
+    if settings.skills_enabled:
+        real_tools.extend([activate_skill, run_skill_script, read_skill_resource])
+    workflow.add_node("tools", ToolNode(real_tools))
     # 单视频入口
     workflow.add_node("video_start", video_start_node)
     # 批量入口 + 循环控制器 + 收尾 + 补做入口（Phase 1 串行队列）
@@ -232,6 +260,8 @@ async def build_agent(checkpointer):
     workflow.add_node("request_review", request_review_node)
     workflow.add_node("resource_prep", resource_prep_node)
     workflow.add_node("render", render_node)
+    # 创意期熔断节点：supervisor_route_after 审计 storyboard 不合格且超限时变轨到此
+    workflow.add_node("creative_fail", creative_fail_node)
 
     workflow.set_entry_point("agent")
     workflow.add_conditional_edges("agent", should_continue)
@@ -244,12 +274,15 @@ async def build_agent(checkpointer):
     # 每个 worker 干完回 supervisor_route（微观调度循环）
     for w in WORKERS:
         workflow.add_edge(w, "supervisor_route")
-    # supervisor_route →(命中 worker) 该 worker / (FINISH/超上限) after_creative 判定 → request_review（逐个审）/ resource_prep（跳审稿）
-    workflow.add_conditional_edges("supervisor_route", supervisor_route_after, [*WORKERS, "request_review", "resource_prep"])
+    # supervisor_route →(命中 worker) 该 worker / (FINISH/超上限) after_creative 判定 → request_review（逐个审）/ resource_prep（跳审稿）/ creative_fail（分镜熔断）
+    workflow.add_conditional_edges("supervisor_route", supervisor_route_after, [*WORKERS, "request_review", "resource_prep", "creative_fail"])
     workflow.add_edge("request_review", "resource_prep")
     workflow.add_edge("resource_prep", "render")
     # render → batch_dispatch（批量循环）/ resource_prep（单视频失败局部重试,复用同 task_id 同卡）/ agent（单视频成功或彻底失败回总结）
     workflow.add_conditional_edges("render", after_render, ["batch_dispatch", "resource_prep", "agent"])
+    # creative_fail 熔断后复用 after_render 路由：批量场景 batch_queue is not None → batch_dispatch 继续下一轮；
+    # 单视频场景 video_route=agent → agent（带战败 ToolMessage）。熔断未进 render,但路由语义一致,复用之。
+    workflow.add_conditional_edges("creative_fail", after_render, ["batch_dispatch", "resource_prep", "agent"])
     workflow.add_edge("batch_summary", "agent")
     # 补做失败轮：batch_redo_start →(有失败轮) batch_dispatch / (无失败轮) agent
     workflow.add_conditional_edges("batch_redo_start", after_redo_start, ["batch_dispatch", "agent"])

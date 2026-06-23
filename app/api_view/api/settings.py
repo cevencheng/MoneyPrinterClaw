@@ -46,12 +46,16 @@ _EXPOSED_FIELDS: dict[str, tuple[str, type]] = {
     # 视频素材
     "video_pexels_api_keys":  ("media", str),
     "video_pixabay_api_keys": ("media", str),
+    # Skills
+    "github_token":          ("skills", str),
+    "skills_env_allowlist":  ("skills", list),
 }
 
 # API key 字段(GET 返回明文 value,前端按密码框显示;与普通字段区分仅为 UI 语义)
 _KEY_FIELDS = {
     "openai_api_key", "bocha_api_key",
     "video_pexels_api_keys", "video_pixabay_api_keys",
+    "github_token",
 }
 
 
@@ -70,10 +74,11 @@ def _load_toml() -> dict[str, Any]:
 
 
 def _dump_toml(data: dict[str, Any]) -> str:
-    """把 dict 序列化为 TOML 文本(只支持 str / int / float / bool 顶层标量)。
+    """把 dict 序列化为 TOML 文本（只支持顶层标量 + list[str]）。
 
     不引入 tomli_w 这个额外依赖(避免 requirements.txt 膨胀)。我们的 config.toml 结构
     一直是扁平 key=value(没有嵌套 table),手写序列化够用且更可控。
+    list[str] 分支用于 skills_env_allowlist 等数组配置项。
     """
     lines: list[str] = []
     for k, v in data.items():
@@ -85,6 +90,14 @@ def _dump_toml(data: dict[str, Any]) -> str:
             # 转义 " 和 \,然后用双引号包(TOML basic string 规则)
             esc = v.replace("\\", "\\\\").replace('"', '\\"')
             lines.append(f'{k} = "{esc}"')
+        elif isinstance(v, list):
+            # list 仅支持元素为 str（skills_env_allowlist 等场景）。其它类型严格拒绝。
+            if not all(isinstance(x, str) for x in v):
+                raise ValueError(f"settings._dump_toml list 仅支持 str 元素: {k}")
+            items = ", ".join(
+                '"' + x.replace("\\", "\\\\").replace('"', '\\"') + '"' for x in v
+            )
+            lines.append(f"{k} = [{items}]")
         else:
             raise ValueError(f"settings._dump_toml 不支持的类型: {k}={type(v).__name__}")
     return "\n".join(lines) + "\n"
@@ -155,6 +168,15 @@ async def update_settings(request: Request) -> dict[str, Any]:
                 coerced = int(new_val) if new_val != "" else 0
             elif expected_type is str:
                 coerced = str(new_val) if new_val is not None else ""
+            elif expected_type is list:
+                # 仅接受 list[str]（如 skills_env_allowlist）。None/缺失 → 空 list；
+                # 元素全部 str 化 + strip + 空过滤,保持 _dump_toml 的 list 分支要求。
+                if new_val is None:
+                    coerced = []
+                elif isinstance(new_val, list):
+                    coerced = [str(x).strip() for x in new_val if str(x).strip()]
+                else:
+                    raise TypeError(f"list 字段需要 array,收到 {type(new_val).__name__}")
             else:
                 coerced = expected_type(new_val)
         except (TypeError, ValueError):

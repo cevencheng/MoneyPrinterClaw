@@ -469,6 +469,44 @@ async def _stream_response(
             )
             yield f"data: {payload}\n\n"
 
+        # D'. 创意期熔断（creative_failed）→ 分镜不合格且 director 重试超限,创意期就熔断,
+        #     未进 TTS/ASR/素材/渲染车间。复用 stage=failed 渲染（失败卡 + 重试按钮）,
+        #     label 区分"创意期熔断"避免与 render_failed 的"自愈重试"文案混淆。
+        elif kind == "on_custom_event" and name == "creative_failed":
+            data = event.get("data", {}) or {}
+            tid = data.get("task_id") or render_id
+            cid = _card_id(data, render_id)
+            reason = data.get("reason", "") or "分镜不合格"
+            snap = creative_states.get(tid)
+            if snap is not None:
+                snap["stage"] = "failed"
+                snap["label"] = f"❌ 创意期熔断：{reason}"
+                args = _snap_args(snap)
+            else:
+                args = {
+                    "stage": "failed",
+                    "label": f"❌ 创意期熔断：{reason}",
+                    "task_id": tid,
+                    "topic": data.get("topic", ""),
+                    "batch_index": data.get("batch_index"),
+                    "batch_total": data.get("batch_total"),
+                }
+            if builder is not None:
+                builder.add_tool_call(cid, "render_video", args)
+            payload = json.dumps(
+                {
+                    "tool_call": {
+                        "id": cid,
+                        "name": "render_video",
+                        "args": args,
+                        "status": "running",
+                    }
+                },
+                ensure_ascii=False,
+                default=str,
+            )
+            yield f"data: {payload}\n\n"
+
         # E''. 批量占位（batch_queued）→ 预发 N 个排队卡（render-batch-{i}，stage=queued），
         #       前端一开始就看到所有任务（1/2 排队中、2/2 排队中…），串行推进时原地更新
         elif kind == "on_custom_event" and name == "batch_queued":

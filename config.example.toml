@@ -41,6 +41,20 @@ video_asr_language = "zh"
 bocha_api_key = "sk-your-bocha-key-here"
 search_react_tool_call_limit = 4   # researcher 等 ReAct 子 Agent 单次调用累计工具调用上限；达到后切整理模式产出，避免截断丢失
 
+# ---- Skills（Agent Skills 标准 client）----
+skills_enabled = true
+skills_project_dir = "../.agents/skills"          # 项目级 skill 目录（相对 app/ 工作目录）
+skills_user_dir = ""                                # 用户级 ~/.agents/skills；空=不扫
+skills_script_timeout = 120                         # 受控脚本执行超时(秒)
+skills_script_max_output = 30000                    # stdout/stderr 截断字符数
+skills_script_max_resource_bytes = 102400           # read_skill_resource 文件大小上限(B)，默认 100KB
+# 环境变量白名单：除 PATH/SYSTEMROOT/TEMP/LANG/PYTHONIOENCODING 外，允许灌进 skill 进程的 key。
+# 默认空 = 第三方 skill 拿不到任何业务密钥；用到 Pexels/OpenAI 等需用户显式列入此项。
+skills_env_allowlist = []
+# GitHub Personal Access Token（可选）：用于 skill 安装时调 GitHub REST API。
+# 空 = 匿名 60 次/小时；非空 = 5000 次/小时。生成路径：github.com/settings/tokens (scope 选 public_repo)
+github_token = ""
+
 # ---- 视频素材搜索 ----
 video_pexels_api_keys  = ""    # 逗号分隔的 Pexels API Keys
 video_pixabay_api_keys = ""    # 可选

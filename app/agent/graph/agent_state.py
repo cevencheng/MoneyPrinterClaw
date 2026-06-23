@@ -77,6 +77,12 @@ class AgentState(TypedDict):
     # 失败时不带战败 ToolMessage 唤醒 agent → 未应答的 plan_video tool_call → agent 盲目"二胎"下发
     # 新 plan_video → 幽灵卡 + 双卡。显式 route 字段消除计数器推断的歧义。
     video_route: str
+    # director 分镜合格性熔断的局部重试计数（仿 video_retry_count）：supervisor_route_after
+    # 在创意期→生产期咽喉审计 storyboard（非空 + 每个 shot 有 search_prompt），不合格且未超限 →
+    # Command(goto="director") 原地重派、清空 storyboard 让 director 重干；超限 → 变轨 creative_fail
+    # 熔断登记失败、不再推进到 TTS/ASR/素材/渲染车间（避免对注定失败的残次品浪费下游算力）。
+    # 每轮新视频在 _prepare_video_round 归零，恢复完整重试预算。
+    director_retry_count: int
     # plan_video_batch 的 tool_call_id（batch_start 写入,batch_summary 用之回 ToolMessage）。
     # 必要：messages 被 keep_last_k 截断后,batch_summary 反查 messages 可能找不到原 tool_call。
     batch_tool_call_id: str

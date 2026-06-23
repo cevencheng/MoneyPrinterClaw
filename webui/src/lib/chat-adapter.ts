@@ -340,32 +340,38 @@ export function useExternalChatStore(): {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let fullText = "";
-    const toolParts = new Map<string, BackendPart>();
-    const toolOrder: string[] = [];
+    // 有序 parts 队列：text 与 tool-call 按到达时间穿插（而非 text 全在前）。
+    // 批量任务 agent 有两段文本（开头说明 + 结尾总结）,中间隔着工具卡,穿插排列
+    // 让结尾总结显示在工具卡之后,而不是被拼到最前。
+    const parts: BackendPart[] = [];
+    const toolIndex = new Map<string, number>(); // toolCallId → 在 parts 中的下标
+    let pendingText = "";
 
-    // 复用 bubble 时:把已渲染的 parts 反向 hydrate 进 toolParts/toolOrder/fullText,
-    // 让后续 SSE tool_call(同 toolCallId)能命中现有卡片更新而非追加新卡。
+    // 复用 bubble 时:把已渲染的 parts 按原顺序 hydrate 进 parts/toolIndex/pendingText,
+    // 让后续 SSE tool_call(同 toolCallId)能命中现有卡片原位更新而非追加新卡。
     if (opts?.reuseLastAssistant) {
       for (const part of assistantMsg.content) {
         if (part.type === "tool-call") {
-          toolParts.set(part.toolCallId, part);
-          if (!toolOrder.includes(part.toolCallId)) toolOrder.push(part.toolCallId);
+          toolIndex.set(part.toolCallId, parts.length);
+          parts.push(part);
         } else if (part.type === "text") {
-          fullText += part.text;
+          parts.push(part);
         }
       }
     }
 
-    const buildContent = (): BackendPart[] => {
-      const parts: BackendPart[] = [];
-      // 文本在前、工具卡片在后（修正 UI 倒置：文字在上，tool-call 在下）
-      if (fullText) parts.push({ type: "text", text: fullText });
-      for (const id of toolOrder) {
-        const p = toolParts.get(id);
-        if (p) parts.push(p);
+    const flushPendingText = () => {
+      if (pendingText) {
+        parts.push({ type: "text", text: pendingText });
+        pendingText = "";
       }
-      return parts;
+    };
+
+    const buildContent = (): BackendPart[] => {
+      // 末尾未封的 text 一并 flush（不修改 parts 原状态,产新数组）
+      const out = [...parts];
+      if (pendingText) out.push({ type: "text", text: pendingText });
+      return out;
     };
 
     // flush：新建对象 + 新数组（WeakMap 缓存要求）
@@ -397,7 +403,7 @@ export function useExternalChatStore(): {
           }
 
           if (typeof parsed.delta === "string") {
-            fullText += parsed.delta;
+            pendingText += parsed.delta;
             flush();
             continue;
           }
@@ -408,33 +414,45 @@ export function useExternalChatStore(): {
               args?: unknown;
             };
             const args = (tc.args ?? {}) as Record<string, JsonValue>;
-            toolParts.set(tc.id, {
-              type: "tool-call",
-              toolCallId: tc.id,
-              toolName: tc.name,
-              args,
-              argsText: JSON.stringify(args),
-            });
-            if (!toolOrder.includes(tc.id)) toolOrder.push(tc.id);
+            // 先封当前 text 段入队,保证 text 在此 tool-call 之前
+            flushPendingText();
+            const idx = toolIndex.get(tc.id);
+            if (idx === undefined) {
+              // 新 tool-call：追加 + 记位置
+              toolIndex.set(tc.id, parts.length);
+              parts.push({
+                type: "tool-call",
+                toolCallId: tc.id,
+                toolName: tc.name,
+                args,
+                argsText: JSON.stringify(args),
+              });
+            } else {
+              // 同 id 后续事件：原位更新 args/argsText/toolName（progress 推进）,不挪位
+              const existing = parts[idx] as BackendPart & { type: "tool-call" };
+              existing.toolName = tc.name || existing.toolName;
+              existing.args = args;
+              existing.argsText = JSON.stringify(args);
+            }
             flush();
             continue;
           }
           if (parsed.tool_result && typeof parsed.tool_result === "object") {
             const tr = parsed.tool_result as { id: string; result?: unknown };
-            const existing = toolParts.get(tr.id) as
-              | (BackendPart & { type: "tool-call" })
-              | undefined;
-            if (existing) {
-              toolParts.set(tr.id, { ...existing, result: tr.result });
+            const idx = toolIndex.get(tr.id);
+            if (idx !== undefined) {
+              // 原位更新 result,不挪位
+              parts[idx] = { ...(parts[idx] as BackendPart & { type: "tool-call" }), result: tr.result };
             } else {
-              toolParts.set(tr.id, {
+              // 没见过 start 但来了 result —— 补一个空 tool-call 兜底
+              toolIndex.set(tr.id, parts.length);
+              parts.push({
                 type: "tool-call",
                 toolCallId: tr.id,
                 toolName: "",
                 args: {},
                 result: tr.result,
               });
-              toolOrder.push(tr.id);
             }
             flush();
             continue;
@@ -446,7 +464,7 @@ export function useExternalChatStore(): {
       }
     } catch (e) {
       if (!ctrl.signal.aborted) {
-        fullText += `\n\n[流式中断: ${(e as Error).message}]`;
+        pendingText += `\n\n[流式中断: ${(e as Error).message}]`;
         flush();
       }
     } finally {

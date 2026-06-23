@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ClientShell } from "@/components/layout/ClientShell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,8 +30,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="h-dvh overflow-hidden flex flex-col">
-        <TooltipProvider>{children}</TooltipProvider>
+      <body className="h-dvh overflow-hidden flex">
+        <TooltipProvider>
+          <ClientShell>{children}</ClientShell>
+        </TooltipProvider>
       </body>
     </html>
   );

@@ -221,90 +221,97 @@ async def replace_assistant_message(message_id: str, parts: list[dict[str, Any]]
 class AssistantMessageBuilder:
     """累积一次 SSE 流的 assistant parts,流末一次性写库。
 
-    与 chat-adapter 前端的 buildContent 对齐：
-    - delta：累计到 fullText（text part 在前）
-    - tool_call：按 id 索引,新建/更新 tool-call part
-    - tool_result：在对应 tool-call part 上写 result（同时 toolName 取自原 tool_call）
+    有序 parts 队列：text 与 tool-call 按到达时间穿插排列（而非 text 全在前）。
+    批量任务里 agent 有两段文本（开头说明 + 结尾总结）,中间隔着工具卡 ——
+    穿插排列让结尾总结显示在工具卡之后,而不是被拼到最前。
+
+    - delta：累积到 _pending_text,遇到 tool_call 或 build 时封段入队（避免碎成千百个 text part）
+    - tool_call：先封当前 _pending_text,再原位更新（同 id）或追加（新 id）tool-call part
+    - tool_result：按 _tool_index 原位更新 result,不挪位
     """
 
     def __init__(self) -> None:
-        self._text = ""
-        self._tools: dict[str, dict[str, Any]] = {}
-        self._order: list[str] = []
+        self._parts: list[dict[str, Any]] = []
+        self._tool_index: dict[str, int] = {}  # toolCallId → 在 _parts 中的下标
+        self._pending_text: str = ""
 
     def seed(self, parts: list[dict[str, Any]]) -> None:
-        """从既有 parts（如 DB 里加载的旧 assistant 消息）填充内部状态。
+        """从既有 parts（如 DB 里加载的旧 assistant 消息）按原顺序填充内部状态。
 
         用于 /continue：把上一次中断时已写入 DB 的内容预加载进来,后续事件 update 在此之上,
-        flush 时 REPLACE 同一行（避免 DB 多出一条 assistant 行）。
+        flush 时 REPLACE 同一行（避免 DB 多出一条 assistant 行）。按原顺序入队,
+        text part 直接保留为独立 part（不同时间段的文本不合并）。
         """
         for p in parts or []:
             ptype = p.get("type")
             if ptype == "text":
                 t = p.get("text", "") or ""
                 if t:
-                    self._text += t
+                    self._parts.append({"type": "text", "text": t})
             elif ptype == "tool-call":
                 tid = p.get("toolCallId") or ""
                 if not tid:
                     continue
-                self._tools[tid] = {
+                self._tool_index[tid] = len(self._parts)
+                self._parts.append({
                     "type": "tool-call",
                     "toolCallId": tid,
                     "toolName": p.get("toolName", ""),
                     "args": p.get("args", {}) or {},
-                }
-                if "result" in p:
-                    self._tools[tid]["result"] = p["result"]
-                if tid not in self._order:
-                    self._order.append(tid)
+                    **({"result": p["result"]} if "result" in p else {}),
+                })
 
     def add_delta(self, text: str) -> None:
         if text:
-            self._text += text
+            self._pending_text += text
+
+    def _flush_pending_text(self) -> None:
+        """把累积的 _pending_text 封成 text part 入队（非空才入）,清空累积。"""
+        if self._pending_text:
+            self._parts.append({"type": "text", "text": self._pending_text})
+            self._pending_text = ""
 
     def add_tool_call(
         self, tool_id: str, name: str, args: dict[str, Any] | None
     ) -> None:
-        existing = self._tools.get(tool_id)
-        if existing is None:
-            self._tools[tool_id] = {
+        # 先封当前 text 段入队,保证 text 在此 tool-call 之前
+        self._flush_pending_text()
+        idx = self._tool_index.get(tool_id)
+        if idx is None:
+            # 新 tool-call：追加,记录位置
+            self._tool_index[tool_id] = len(self._parts)
+            self._parts.append({
                 "type": "tool-call",
                 "toolCallId": tool_id,
                 "toolName": name,
                 "args": args or {},
-            }
-            self._order.append(tool_id)
+            })
         else:
-            # 同 id 后续事件覆盖 args（如 progress 推进进度）/ 更新 toolName 兜底
-            existing["toolName"] = name or existing["toolName"]
+            # 同 id 后续事件：原位更新 args/toolName（progress 推进进度）,不挪位
+            existing = self._parts[idx]
+            existing["toolName"] = name or existing.get("toolName", "")
             if args:
                 existing["args"] = args
 
     def add_tool_result(self, tool_id: str, result: Any) -> None:
-        existing = self._tools.get(tool_id)
-        if existing is None:
-            # 没见过 start 但来了 result —— 极少见,补一个空 tool-call 兜底
-            existing = {
+        idx = self._tool_index.get(tool_id)
+        if idx is None:
+            # 没见过 start 但来了 result —— 极少见,补一个空 tool-call 兜底（同原逻辑）
+            self._tool_index[tool_id] = len(self._parts)
+            self._parts.append({
                 "type": "tool-call",
                 "toolCallId": tool_id,
                 "toolName": "",
                 "args": {},
-            }
-            self._tools[tool_id] = existing
-            self._order.append(tool_id)
-        existing["result"] = result
+                "result": result,
+            })
+        else:
+            self._parts[idx]["result"] = result
 
     def build(self) -> list[dict[str, Any]]:
-        """生成 parts：text 在前,tool-call 按出现顺序在后（与 chat-adapter buildContent 一致）。"""
-        parts: list[dict[str, Any]] = []
-        if self._text:
-            parts.append({"type": "text", "text": self._text})
-        for tid in self._order:
-            tc = self._tools.get(tid)
-            if tc:
-                parts.append(tc)
-        return parts
+        """生成 parts：text 与 tool-call 按到达时间穿插排列。末尾未封的 text 一并 flush。"""
+        self._flush_pending_text()
+        return list(self._parts)
 
     def is_empty(self) -> bool:
-        return not self._text and not self._tools
+        return not self._parts and not self._pending_text

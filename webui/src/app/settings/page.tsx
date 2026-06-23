@@ -228,12 +228,12 @@ export default function SettingsPage() {
 
   return (
     <div
-      className={`h-dvh bg-background settings-scroll ${
+      className={`h-full w-full flex-1 min-w-0 overflow-y-auto bg-background settings-scroll ${
         isScrolling ? "is-scrolling" : ""
       }`}
       onScroll={onScroll}
     >
-      <div className="container mx-auto max-w-2xl px-6 py-8">
+      <div className="container mx-auto max-w-3xl px-6 py-8">
         {/* 顶栏 */}
         <div className="mb-6 flex items-center gap-3">
           <Link

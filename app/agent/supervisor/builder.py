@@ -28,6 +28,9 @@ from agent.supervisor.sop.loader import load_sop
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
+# director 分镜合格性熔断的局部重试上限（共 MAX_DIRECTOR_RETRY+1 次 director 调用）。
+# 超限仍不合格 → creative_fail 熔断登记失败，不再推进到 TTS/ASR/素材/渲染车间。
+MAX_DIRECTOR_RETRY = 2
 WORKERS = ["researcher", "editor", "reviewer", "director"]
 
 # worker 花名册（拼入 route 的 prompt，让 Supervisor 认识手下）
@@ -93,6 +96,20 @@ def _fallback_next(state) -> str:
     return "editor"
 
 
+def _storyboard_valid(state) -> bool:
+    """分镜合格性审计（创意期→生产期咽喉闸门）。
+
+    合格 = storyboard 非空 且 每个 shot 都有非空 search_prompt。
+    search_prompt 是 resource_prep 唯一的素材检索词来源（video_nodes.py L154），
+    任一缺失 → 该镜头搜不到素材 → render 注定 videos=0 失败。在此拦截避免浪费
+    TTS/ASR/下载/渲染车间算力。空 storyboard（director 返空 / 解析降级置空）同样不合格。
+    """
+    shots = state.get("storyboard") or []
+    if not shots:
+        return False
+    return all(isinstance(s, dict) and (s.get("search_prompt") or "").strip() for s in shots)
+
+
 async def supervisor_route_node(state) -> dict:
     """主图创意中枢路由节点：按 SOP 决策下一步派哪个 worker。
 
@@ -114,14 +131,38 @@ async def supervisor_route_node(state) -> dict:
         reasoning = "(结构化解析失败，启发式 fallback)"
     it = int(state.get("supervisor_iteration", 0)) + 1
     sr = state.get("script_review")
+
+    # ===== 咽喉审计：即将进生产期（nxt 非 worker = FINISH/超限/未知）时刚性拦截 storyboard =====
+    # 不合格且未超限 → 改派 director 重干 + 清空残次 storyboard + 计数+1（director 无状态,
+    #   清空 storyboard 防止 _fallback_next 误判已出分镜而 FINISH；重干时 director 拿到 script 重拆）。
+    # 不合格且超限 → 设 video_route="creative_fail" 标志,supervisor_route_after 据此变轨熔断节点,
+    #   不再推进到 resource_prep/render,避免对注定失败的残次品浪费 TTS/ASR/素材/渲染算力。
+    update = {"supervisor_next": nxt, "supervisor_iteration": it}
+    if nxt not in WORKERS and not _storyboard_valid(state):
+        retry = int(state.get("director_retry_count", 0))
+        if retry < MAX_DIRECTOR_RETRY:
+            update["supervisor_next"] = "director"
+            update["storyboard"] = []  # 清空残次品,director 重干
+            update["director_retry_count"] = retry + 1
+            logger.warning(
+                "[supervisor/route] 分镜不合格（retry %d/%d）→ 重派 director 重干",
+                retry + 1, MAX_DIRECTOR_RETRY,
+            )
+        else:
+            update["video_route"] = "creative_fail"
+            logger.error(
+                "[supervisor/route] 分镜不合格且超限（retry %d/%d）→ 熔断 creative_fail",
+                retry, MAX_DIRECTOR_RETRY,
+            )
+
     logger.info(
         "[supervisor/route] iter=%d next=%s | script=%s review_passed=%s storyboard=%s | %s",
-        it, nxt, bool(state.get("script_text")),
+        it, update["supervisor_next"], bool(state.get("script_text")),
         sr.get("passed") if isinstance(sr, dict) else None,
         bool(state.get("storyboard")),
         (reasoning or "")[:80],
     )
-    return {"supervisor_next": nxt, "supervisor_iteration": it}
+    return update
 
 
 def supervisor_route_after(state) -> str:
@@ -131,7 +172,12 @@ def supervisor_route_after(state) -> str:
     - FINISH / 超迭代上限 / 未知 → 走 after_creative 的跳审稿判定（request_review 或
       resource_prep）。after_creative 复用原逻辑，按 user_auto_review / batch_auto_review
       决定是否跳过人工审稿。
+    - 分镜熔断（supervisor_route_node 审计 storyboard 不合格且超限时设 video_route=
+      "creative_fail"）→ 变轨 creative_fail 节点登记失败,不再推进到 resource_prep/render。
     """
+    # 分镜熔断优先：creative_fail 标志由 supervisor_route_node 咽喉审计设置
+    if state.get("video_route") == "creative_fail":
+        return "creative_fail"
     # 硬守卫优先：超迭代上限强制走 after_creative（不依赖 LLM 自觉，即使 next 仍是 worker 也打断）
     if int(state.get("supervisor_iteration", 0)) >= MAX_ITERATIONS:
         logger.warning("[supervisor] 达迭代上限 %d，强制 FINISH", MAX_ITERATIONS)
